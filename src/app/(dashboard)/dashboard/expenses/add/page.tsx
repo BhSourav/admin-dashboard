@@ -4,36 +4,29 @@
  * Add Expense Page
  * 
  * Form for users to add new expense entries.
- * Includes category selection, amount input, date picker, and description.
+ * Uses the Transaction table with Type/Category hierarchy.
  */
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { supabase } from '@/lib/supabase/client'
+import { supabase, TransactionType } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
 import { TrendingDown, Loader2, CheckCircle2 } from 'lucide-react'
 
-/**
- * Common expense categories
- * Can be expanded based on user needs
- */
-const expenseCategories = [
-  'Food & Dining',
-  'Transportation',
-  'Utilities',
-  'Healthcare',
-  'Entertainment',
-  'Shopping',
-  'Education',
-  'Housing',
-  'Insurance',
-  'Other'
-]
+interface ExpenseType {
+  TypeID: string
+  Name: string
+  CategoryID: string
+  Category: {
+    Name: string
+    Type: TransactionType
+  }
+}
 
 export default function AddExpensePage() {
   const router = useRouter()
@@ -41,14 +34,91 @@ export default function AddExpensePage() {
   
   const [formData, setFormData] = useState({
     amount: '',
-    category: '',
+    typeId: '',
     description: '',
     date: new Date().toISOString().split('T')[0],
   })
   
+  const [expenseTypes, setExpenseTypes] = useState<ExpenseType[]>([])
+  const [personId, setPersonId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingTypes, setLoadingTypes] = useState(true)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
+
+  /**
+   * Fetch expense types from database on mount
+   */
+  useEffect(() => {
+    fetchExpenseTypes()
+    fetchOrCreatePerson()
+  }, [user])
+
+  /**
+   * Fetch or create Person record for the current user
+   */
+  const fetchOrCreatePerson = async () => {
+    if (!user) return
+
+    try {
+      // First check if person exists for this user
+      let { data: person, error: fetchError } = await supabase
+        .from('Person')
+        .select('PersonID')
+        .eq('Name', user.email)
+        .single()
+
+      if (fetchError || !person) {
+        // Create new person record
+        const { data: newPerson, error: createError } = await supabase
+          .from('Person')
+          .insert({
+            Name: user.email || 'Unknown User'
+          })
+          .select('PersonID')
+          .single()
+
+        if (createError) {
+          console.error('Error creating person:', createError)
+          return
+        }
+        setPersonId(newPerson?.PersonID)
+      } else {
+        setPersonId(person.PersonID)
+      }
+    } catch (error) {
+      console.error('Error managing person:', error)
+    }
+  }
+
+  /**
+   * Fetch expense types (Types with Category.Type = 'EXPENSE')
+   */
+  const fetchExpenseTypes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('Type')
+        .select(`
+          TypeID,
+          Name,
+          CategoryID,
+          Category!inner (
+            Name,
+            Type
+          )
+        `)
+        .eq('Category.Type', 'EXPENSE')
+        .order('Name')
+
+      if (error) throw error
+      setExpenseTypes((data as any[]) || [])
+    } catch (error) {
+      console.error('Error fetching expense types:', error)
+      setError('Failed to load expense categories')
+    } finally {
+      setLoadingTypes(false)
+    }
+  }
 
   /**
    * Handle form input changes
@@ -64,13 +134,13 @@ export default function AddExpensePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!user) {
+    if (!user || !personId) {
       setError('You must be logged in to add expenses')
       return
     }
 
     // Validate form
-    if (!formData.amount || !formData.category || !formData.date) {
+    if (!formData.amount || !formData.typeId || !formData.date) {
       setError('Please fill in all required fields')
       return
     }
@@ -79,15 +149,14 @@ export default function AddExpensePage() {
     setError('')
 
     try {
-      // Insert expense into Supabase
+      // Insert transaction into Supabase
       const { error: insertError } = await supabase
-        .from('expenses')
+        .from('Transaction')
         .insert({
-          user_id: user.id,
-          amount: parseFloat(formData.amount),
-          category: formData.category,
-          description: formData.description,
-          date: formData.date,
+          TransID: formData.typeId, // TypeID goes in TransID field
+          PersonID: personId,
+          Amount: parseFloat(formData.amount),
+          TransactionDate: formData.date,
         })
 
       if (insertError) throw insertError
@@ -167,23 +236,27 @@ export default function AddExpensePage() {
                     </div>
                   </div>
 
-                  {/* Category */}
+                  {/* Type/Category Selection */}
                   <div className="space-y-2">
-                    <Label htmlFor="category">Category *</Label>
+                    <Label htmlFor="typeId">Category *</Label>
                     <select
-                      id="category"
-                      value={formData.category}
-                      onChange={(e) => handleChange('category', e.target.value)}
+                      id="typeId"
+                      value={formData.typeId}
+                      onChange={(e) => handleChange('typeId', e.target.value)}
                       className="w-full h-12 px-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                       required
-                      disabled={loading}
+                      disabled={loading || loadingTypes}
                     >
                       <option value="">Select a category</option>
-                      {expenseCategories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
+                      {loadingTypes ? (
+                        <option disabled>Loading categories...</option>
+                      ) : (
+                        expenseTypes.map((type) => (
+                          <option key={type.TypeID} value={type.TypeID}>
+                            {type.Category?.Name} - {type.Name}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
 

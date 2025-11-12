@@ -30,43 +30,116 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholde
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 /**
+ * Enum definitions from Supabase database
+ */
+export type AgeGroup = 'ADULT' | 'TEEN' | 'CHILD' | 'STUDENT'
+export type ContactPreference = 'EMAIL' | 'MOBILE' | 'WHATSAPP' | 'FACEBOOK' | 'POST' | 'FAX'
+export type TransactionType = 'INCOME' | 'EXPENSE'
+
+/**
  * Type definitions for the application's database schema
- * These will be expanded as we define the data models
+ * Based on the actual Supabase database structure
  */
 export type Database = {
   public: {
+    Enums: {
+      AgeGroup: AgeGroup
+      ContactPreference: ContactPreference
+      TransactionType: TransactionType
+    }
     Tables: {
-      expenses: {
+      Transaction: {
         Row: {
-          id: string
-          user_id: string
-          amount: number
-          category: string
-          description: string
-          date: string
-          bill_url?: string
+          TransactionID: string
           created_at: string
+          TransID: string
+          PersonID: string
+          TransactionDate: string
+          Amount: number
+          BillID?: string
+        }
+        Insert: {
+          TransactionID?: string
+          TransID: string
+          PersonID: string
+          TransactionDate: string
+          Amount: number
+          BillID?: string
         }
       }
-      income: {
+      Type: {
         Row: {
-          id: string
-          user_id: string
-          amount: number
-          source: string
-          description: string
-          date: string
+          TypeID: string
           created_at: string
+          CategoryID: string
+          Name: string
         }
       }
-      user_privileges: {
+      Category: {
         Row: {
-          user_id: string
-          can_add_expense: boolean
-          can_add_income: boolean
-          can_view_reports: boolean
-          can_upload_bills: boolean
-          can_download_reports: boolean
+          CategoryID: string
+          created_at: string
+          Name: string
+          Type: TransactionType
+        }
+      }
+      Bill: {
+        Row: {
+          BillID: string
+          created_at: string
+          PersonID: string
+          FileName: string
+          FilePath: string
+          FileMime: string
+          Extension: string
+        }
+        Insert: {
+          BillID?: string
+          PersonID: string
+          FileName: string
+          FilePath: string
+          FileMime: string
+          Extension: string
+        }
+      }
+      Person: {
+        Row: {
+          PersonID: string
+          created_at: string
+          Name: string
+          ContactID?: string
+          AgeGroup?: AgeGroup
+        }
+      }
+      Contact: {
+        Row: {
+          ContactID: string
+          created_at: string
+          AddressID?: string
+          SessionID?: string
+          Email?: string
+          Telephone?: string
+          Mobile?: string
+          Fax?: string
+        }
+      }
+      Address: {
+        Row: {
+          AddressID: string
+          created_at: string
+          Street?: string
+          Number?: string
+          PL2?: string
+          Place?: string
+        }
+      }
+      Social: {
+        Row: {
+          SocialID: string
+          created_at: string
+          Whatsapp?: string
+          Facebook?: string
+          Instagram?: string
         }
       }
     }

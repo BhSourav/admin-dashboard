@@ -7,25 +7,119 @@
  * recent transactions, and quick stats.
  */
 
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { TrendingDown, TrendingUp, Wallet, Calendar, DollarSign, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/auth-context'
+import { supabase, TransactionType } from '@/lib/supabase/client'
+
+interface Transaction {
+  TransactionID: string
+  Amount: number
+  TransactionDate: string
+  Type: {
+    Name: string
+    Category: {
+      Name: string
+      Type: TransactionType
+    }
+  }
+}
 
 export default function DashboardPage() {
   const { user, privileges } = useAuth()
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState({
+    totalIncome: 0,
+    totalExpenses: 0,
+    netBalance: 0,
+    thisMonth: 0
+  })
 
-  /**
-   * Sample data - In production, this would come from Supabase
-   * These will be replaced with real data from your Supabase database
-   */
+  useEffect(() => {
+    if (user) {
+      fetchTransactions()
+    }
+  }, [user])
+
+  const fetchTransactions = async () => {
+    try {
+      // Get Person record for current user
+      const { data: person } = await supabase
+        .from('Person')
+        .select('PersonID')
+        .eq('Name', user?.email)
+        .single()
+
+      if (!person) {
+        setLoading(false)
+        return
+      }
+
+      // Fetch transactions with Type and Category joins
+      const { data, error } = await supabase
+        .from('Transaction')
+        .select(`
+          TransactionID,
+          Amount,
+          TransactionDate,
+          Type:TransID (
+            Name,
+            Category (
+              Name,
+              Type
+            )
+          )
+        `)
+        .eq('PersonID', person.PersonID)
+        .order('TransactionDate', { ascending: false })
+        .limit(10)
+
+      if (error) throw error
+
+      const txns = (data as any[]) || []
+      setTransactions(txns)
+
+      // Calculate stats
+      const income = txns
+        .filter((t: any) => t.Type?.Category?.Type === 'INCOME')
+        .reduce((sum: number, t: any) => sum + t.Amount, 0)
+      
+      const expenses = txns
+        .filter((t: any) => t.Type?.Category?.Type === 'EXPENSE')
+        .reduce((sum: number, t: any) => sum + t.Amount, 0)
+
+      const thisMonthStart = new Date()
+      thisMonthStart.setDate(1)
+      const thisMonthTxns = txns.filter((t: any) => 
+        new Date(t.TransactionDate) >= thisMonthStart
+      )
+      const thisMonthNet = thisMonthTxns.reduce((sum: number, t: any) => {
+        const amount = t.Amount
+        return t.Type?.Category?.Type === 'INCOME' ? sum + amount : sum - amount
+      }, 0)
+
+      setStats({
+        totalIncome: income,
+        totalExpenses: expenses,
+        netBalance: income - expenses,
+        thisMonth: thisMonthNet
+      })
+    } catch (error) {
+      console.error('Error fetching transactions:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const financialStats = [
     {
       title: 'Total Income',
-      value: '$12,453.00',
-      change: '+12.5%',
+      value: `$${stats.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      change: 'This period',
       trend: 'up',
       icon: <TrendingUp className="h-5 w-5" />,
       color: 'text-green-600',
@@ -33,8 +127,8 @@ export default function DashboardPage() {
     },
     {
       title: 'Total Expenses',
-      value: '$8,234.50',
-      change: '+8.2%',
+      value: `$${stats.totalExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      change: 'This period',
       trend: 'down',
       icon: <TrendingDown className="h-5 w-5" />,
       color: 'text-red-600',
@@ -42,33 +136,22 @@ export default function DashboardPage() {
     },
     {
       title: 'Net Balance',
-      value: '$4,218.50',
-      change: '+23.1%',
-      trend: 'up',
+      value: `$${stats.netBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      change: stats.netBalance >= 0 ? 'Profit' : 'Loss',
+      trend: stats.netBalance >= 0 ? 'up' : 'down',
       icon: <Wallet className="h-5 w-5" />,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50 dark:bg-blue-900/20',
+      color: stats.netBalance >= 0 ? 'text-blue-600' : 'text-red-600',
+      bgColor: stats.netBalance >= 0 ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-red-50 dark:bg-red-900/20',
     },
     {
       title: 'This Month',
-      value: '$2,150.00',
-      change: 'Saved',
+      value: `$${Math.abs(stats.thisMonth).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      change: stats.thisMonth >= 0 ? 'Saved' : 'Overspent',
       trend: 'neutral',
       icon: <Calendar className="h-5 w-5" />,
       color: 'text-purple-600',
       bgColor: 'bg-purple-50 dark:bg-purple-900/20',
     },
-  ]
-
-  /**
-   * Sample recent transactions
-   */
-  const recentTransactions = [
-    { id: 1, type: 'expense', description: 'Grocery Shopping', amount: 156.50, date: '2025-11-11', category: 'Food' },
-    { id: 2, type: 'income', description: 'Salary', amount: 5000.00, date: '2025-11-10', category: 'Salary' },
-    { id: 3, type: 'expense', description: 'Electric Bill', amount: 89.30, date: '2025-11-09', category: 'Utilities' },
-    { id: 4, type: 'expense', description: 'Gas Station', amount: 45.00, date: '2025-11-08', category: 'Transport' },
-    { id: 5, type: 'income', description: 'Freelance Project', amount: 1200.00, date: '2025-11-07', category: 'Freelance' },
   ]
 
   return (
@@ -144,43 +227,56 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentTransactions.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <div className="flex items-center space-x-4">
-                    <div
-                      className={`p-2 rounded-lg ${
-                        transaction.type === 'income'
-                          ? 'bg-green-100 dark:bg-green-900/30'
-                          : 'bg-red-100 dark:bg-red-900/30'
-                      }`}
-                    >
-                      {transaction.type === 'income' ? (
-                        <TrendingUp className="h-5 w-5 text-green-600" />
-                      ) : (
-                        <TrendingDown className="h-5 w-5 text-red-600" />
-                      )}
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white">
-                        {transaction.description}
-                      </p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {transaction.category} • {transaction.date}
-                      </p>
-                    </div>
-                  </div>
-                  <p
-                    className={`text-lg font-semibold ${
-                      transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                    }`}
-                  >
-                    {transaction.type === 'income' ? '+' : '-'}${transaction.amount.toFixed(2)}
-                  </p>
+              {loading ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">Loading transactions...</p>
                 </div>
-              ))}
+              ) : transactions.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">No transactions yet. Start by adding income or expenses!</p>
+                </div>
+              ) : (
+                transactions.map((transaction) => {
+                  const isIncome = transaction.Type?.Category?.Type === 'INCOME'
+                  return (
+                    <div
+                      key={transaction.TransactionID}
+                      className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <div className="flex items-center space-x-4">
+                        <div
+                          className={`p-2 rounded-lg ${
+                            isIncome
+                              ? 'bg-green-100 dark:bg-green-900/30'
+                              : 'bg-red-100 dark:bg-red-900/30'
+                          }`}
+                        >
+                          {isIncome ? (
+                            <TrendingUp className="h-5 w-5 text-green-600" />
+                          ) : (
+                            <TrendingDown className="h-5 w-5 text-red-600" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {transaction.Type?.Name || 'Unknown'}
+                          </p>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {transaction.Type?.Category?.Name} • {new Date(transaction.TransactionDate).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <p
+                        className={`text-lg font-semibold ${
+                          isIncome ? 'text-green-600' : 'text-red-600'
+                        }`}
+                      >
+                        {isIncome ? '+' : '-'}${transaction.Amount.toFixed(2)}
+                      </p>
+                    </div>
+                  )
+                })
+              )}
             </div>
           </CardContent>
         </Card>
